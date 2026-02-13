@@ -54,7 +54,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Create a new session if this user is new (or if the bot restarted)
         if user_id not in chat_sessions:
             chat_sessions[user_id] = client.chats.create(
-                model="gemini-2.0-flash",
+                model="gemini-1.5-flash",
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     temperature=0.7  # Makes him a bit more creative/human
