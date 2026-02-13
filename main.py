@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION (Loading from Environment) ---
-GOOGLE_API_KEY = os.environ.get("AIzaSyDzp11dm2chN910fUfw92tZ8JJust_Cj8o")
-TELEGRAM_TOKEN = os.environ.get("8348492224:AAHTOIBW20CJxGB3xW4mU-qMo4TkqgOfxH8")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
 # --- THE PERSONA ---
 SYSTEM_PROMPT = """
@@ -68,4 +68,4 @@ if __name__ == '__main__':
     
     logger.info("Popo is starting...")
     application.run_polling()
-  
+    
