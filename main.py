@@ -47,7 +47,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if user_id not in chat_sessions:
             chat_sessions[user_id] = client.chats.create(
-                model="models/gemini-1.5-flash", 
+                model="models/gemini-2.0-flash", 
                 config={'system_instruction': SYSTEM_PROMPT}
             )
         
