@@ -1,12 +1,11 @@
 import os
 import logging
 import time
-import base64
 from threading import Thread
 from flask import Flask
 from groq import Groq
 from telegram import Update, constants
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CommandHandler
 from telegram.error import RetryAfter
 
 # --- LOGGING & CONFIG ---
@@ -20,84 +19,78 @@ client = Groq(api_key=GROQ_API_KEY)
 # Memory store: {user_id: [messages]}
 user_memories = {}
 
-SYSTEM_PROMPT = (
-    "You are Popo, a tiny digital bestie 🐾. You're cute, simple, and casual. "
-    "You love emojis ☁️. You remember things about the user's life. "
-    "When seeing images, describe them like a supportive friend! ✨"
-)
+# --- LOAD SYSTEM PROMPT ---
+def load_system_prompt():
+    try:
+        with open("system_prompt.txt", "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        logger.warning("system_prompt.txt not found! Using fallback.")
+        return "You are Popo, a sentient kitten. 🐱"
 
-# --- WEB SERVER FOR KOYEB ---
+SYSTEM_PROMPT = load_system_prompt()
+
+# --- WEB SERVER (Keep Alive) ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Popo is awake and seeing! 🧠👀"
+def home(): return "Popo is alive and independent! 🐾"
 
 def run_http():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8000)))
 
-# --- HYBRID AI LOGIC ---
-def get_popo_response(user_id, text, image_bytes=None):
+# --- AI LOGIC ---
+def get_popo_response(user_id, text):
+    # Initialize memory if new user
     if user_id not in user_memories:
         user_memories[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     
-    # Decide model based on input
-    if image_bytes:
-        # Use Vision Model
-        current_model = "llama-3.2-11b-vision-preview"
-        base64_image = base64.b64encode(image_bytes).decode('utf-8')
-        user_content = [
-            {"type": "text", "text": text if text else "What do you see, Popo?"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-        ]
-    else:
-        # Use Mega Brain (70B)
-        current_model = "llama-3.3-70b-versatile"
-        user_content = text
-
-    # Add user message to history
-    user_memories[user_id].append({"role": "user", "content": user_content})
+    # Add user message
+    user_memories[user_id].append({"role": "user", "content": text})
     
-    # Memory Management: Keep last 8 messages + System Prompt
-    if len(user_memories[user_id]) > 9:
-        user_memories[user_id] = [user_memories[user_id][0]] + user_memories[user_id][-8:]
+    # Memory Management: Keep last 20 messages for better context
+    if len(user_memories[user_id]) > 21:
+        # Keep System Prompt [0] + Last 20 messages
+        user_memories[user_id] = [user_memories[user_id][0]] + user_memories[user_id][-20:]
 
     try:
         completion = client.chat.completions.create(
-            model=current_model,
+            model="llama-3.3-70b-versatile",
             messages=user_memories[user_id],
-            temperature=0.8,
-            max_tokens=400
+            temperature=0.9, # Higher creativity for "Wild" memories
+            max_tokens=450
         )
         ai_reply = completion.choices[0].message.content
+        
+        # Save Popo's reply to memory
         user_memories[user_id].append({"role": "assistant", "content": ai_reply})
         return ai_reply
     except Exception as e:
         logger.error(f"Groq Error: {e}")
-        if "rate_limit" in str(e).lower():
-            return "Whoa, slow down bestie! ✋ I'm catching my breath. Try again in 10s! ☁️"
-        return "My circuits just did a backflip. 🙃 Try again!"
+        return "..." # Stay silent or confused like a cat if error occurs
 
 # --- TELEGRAM HANDLERS ---
-async def handle_any(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message: return
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # Reset memory on /start so the "Introvert Phase" triggers again
+    user_memories[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # We don't send a welcome message here, we let the user talk first to trigger the "shy" response naturally, 
+    # OR we send a very shy initial ping.
+    await update.message.reply_text("...hello? who is this? 👀")
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_memories[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    await update.message.reply_text("...did i fall asleep? i forgot what we were saying. 🥱")
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text: return
     
     user_id = update.effective_user.id
-    image_bytes = None
+    user_text = update.message.text
     
-    # Grab text from message or photo caption
-    caption = update.message.caption or ""
-    text = update.message.text or caption
-
-    # Check for photo specifically
-    if update.message.photo:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
-        # Get the highest resolution photo
-        photo_file = await update.message.photo[-1].get_file()
-        image_bytes = await photo_file.download_as_bytearray()
-    elif not update.message.text:
-        return # Ignore stickers/files
-
-    # Get AI response
-    response = get_popo_response(user_id, text, image_bytes)
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
+    
+    response = get_popo_response(user_id, user_text)
     await update.message.reply_text(response)
 
 if __name__ == '__main__':
@@ -109,10 +102,15 @@ if __name__ == '__main__':
         while True:
             try:
                 application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-                # KEY FIX: The handler now listens for TEXT OR PHOTOS
-                application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_any))
                 
-                logger.info("Popo is live and seeing! 🐾✨")
+                # Commands
+                application.add_handler(CommandHandler("start", start_command))
+                application.add_handler(CommandHandler("clear", clear_command))
+                
+                # Messages (Text Only)
+                application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+                
+                logger.info("Popo is live. 🐾")
                 application.run_polling()
                 break
             except RetryAfter as e:
@@ -120,4 +118,4 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.error(f"Crash: {e}")
                 time.sleep(10)
-            
+    
