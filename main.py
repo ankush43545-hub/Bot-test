@@ -55,7 +55,7 @@ def get_popo_response(user_id, text):
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=user_memories[user_id],
-            temperature=0.85, 
+            temperature=0.7, 
             max_tokens=200
         )
         ai_reply = completion.choices[0].message.content
